@@ -2,7 +2,7 @@
 
 This module provides some support for @codahale [Metrics](https://dropwizard.github.io/metrics/3.1.0/) library in a Play2 application (Scala)
 
-**This fork contains support for Graphite reporter and works with InfluDB Graphite input plugin.**
+**This fork contains support for Graphite reporter and works with InfluxDB Graphite input plugin.**
 
 [![Build Status](https://travis-ci.org/kenshoo/metrics-play.png)](https://travis-ci.org/kenshoo/metrics-play)
 
