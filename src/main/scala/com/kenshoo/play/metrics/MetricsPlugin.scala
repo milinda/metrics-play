@@ -18,14 +18,13 @@ package com.kenshoo.play.metrics
 import java.util.concurrent.TimeUnit
 
 import ch.qos.logback.classic
-import com.codahale.metrics.logback.InstrumentedAppender
-import play.api.{Logger, Application, Play, Plugin}
-
-import com.codahale.metrics.{JvmAttributeGaugeSet, MetricRegistry, SharedMetricRegistries}
+import com.codahale.metrics.graphite.{Graphite, GraphiteSender, GraphiteReporter}
 import com.codahale.metrics.json.MetricsModule
-import com.codahale.metrics.jvm.{ThreadStatesGaugeSet, GarbageCollectorMetricSet, MemoryUsageGaugeSet}
-
+import com.codahale.metrics.jvm.{GarbageCollectorMetricSet, MemoryUsageGaugeSet, ThreadStatesGaugeSet}
+import com.codahale.metrics.logback.InstrumentedAppender
+import com.codahale.metrics.{MetricFilter, JvmAttributeGaugeSet, MetricRegistry, SharedMetricRegistries}
 import com.fasterxml.jackson.databind.ObjectMapper
+import play.api.{Application, Logger, Play, Plugin}
 
 
 object MetricsRegistry {
@@ -34,7 +33,7 @@ object MetricsRegistry {
     case Some(plugin) => SharedMetricRegistries.getOrCreate(plugin.registryName)
     case None => throw new Exception("metrics plugin is not configured")
   }
-  
+
   @deprecated(message = "use defualtRegistry")
   def default = defaultRegistry
 }
@@ -47,7 +46,7 @@ class MetricsPlugin(val app: Application) extends Plugin {
 
   def registryName = app.configuration.getString("metrics.name").getOrElse("default")
 
-  implicit def stringToTimeUnit(s: String) : TimeUnit = TimeUnit.valueOf(s)
+  implicit def stringToTimeUnit(s: String): TimeUnit = TimeUnit.valueOf(s)
 
   override def onStart() {
     def setupJvmMetrics(registry: MetricRegistry) {
@@ -72,14 +71,38 @@ class MetricsPlugin(val app: Application) extends Plugin {
       }
     }
 
+    def setupGraphiteMetrics(registry: MetricRegistry, rateUnit: String, durationUnit: String) = {
+      val graphiteEnabled = app.configuration.getBoolean("metrics.graphite.enabled").getOrElse(false)
+      if (graphiteEnabled) {
+        val graphitePeriod = app.configuration.getInt("metrics.graphite.period").getOrElse(1)
+        val graphiteUnit = app.configuration.getString("metrics.graphite.unit").getOrElse("MINUTES")
+        val graphiteHost = app.configuration.getString("metrics.graphite.host").getOrElse("localhost")
+        val graphitePort = app.configuration.getInt("metrics.graphite.port").getOrElse(2003)
+        val graphitePrefix = app.configuration.getString("metrics.graphite.prefix").getOrElse("metrics.graphite")
+        val graphiteRateUnit = app.configuration.getString("metrics.graphite.rateUnit").getOrElse(rateUnit)
+        val graphiteDurationUnit = app.configuration.getString("metrics.graphite.durationUnit").getOrElse(durationUnit)
+
+        val graphite = new Graphite(graphiteHost, graphitePort)
+        val graphiteReporter = GraphiteReporter.forRegistry(registry)
+        .prefixedWith(graphitePrefix)
+        .convertRatesTo(TimeUnit.valueOf(graphiteRateUnit))
+        .convertDurationsTo(TimeUnit.valueOf(graphiteDurationUnit))
+        .filter(MetricFilter.ALL)
+        .build(graphite)
+
+        graphiteReporter.start(graphitePeriod, TimeUnit.valueOf(graphiteUnit))
+      }
+    }
+
     if (enabled) {
       val registry: MetricRegistry = SharedMetricRegistries.getOrCreate(registryName)
-      val rateUnit     = app.configuration.getString("metrics.rateUnit", validUnits).getOrElse("SECONDS")
+      val rateUnit = app.configuration.getString("metrics.rateUnit", validUnits).getOrElse("SECONDS")
       val durationUnit = app.configuration.getString("metrics.durationUnit", validUnits).getOrElse("SECONDS")
-      val showSamples  = app.configuration.getBoolean("metrics.showSamples").getOrElse(false)
+      val showSamples = app.configuration.getBoolean("metrics.showSamples").getOrElse(false)
 
       setupJvmMetrics(registry)
       setupLogbackMetrics(registry)
+      setupGraphiteMetrics(registry, rateUnit, durationUnit)
 
       val module = new MetricsModule(rateUnit, durationUnit, showSamples)
       mapper.registerModule(module)
